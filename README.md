@@ -12,6 +12,7 @@ harx
 Usage: harx [options] har-file
 
     -l                           List files , lead by [index]
+    -ld  download                download url
     -lu  urlPattern              like -l , but filter by urlPattern
     -lm  mimetypePattern         like -l , but filter by response mimetype
     -x   dir                     eXtract all content to [dir]
