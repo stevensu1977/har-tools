@@ -7,13 +7,22 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 )
+
+type HarFile struct {
+	Method   string
+	URL      string
+	Size     int
+	MimeType string
+}
 
 type Har struct {
 	Log HLog
@@ -140,10 +149,59 @@ func handle(r *bufio.Reader) {
 		if har.Log.Version == "1.2" {
 			version12 = true
 		}
+
+		fmt.Printf("total %d entry \n", len(har.Log.Entries))
+
 		for index, entry := range har.Log.Entries {
 			output(index, entry)
+
 		}
 	}
+}
+
+func downloadURL(url string, parentPath string, fileName string) {
+
+	mkPath(parentPath)
+	res, err := http.Get(url)
+
+	if err != nil {
+		log.Fatalf("http.Get -> %v", err)
+	}
+
+	data, err := ioutil.ReadAll(res.Body)
+
+	if err != nil {
+		log.Fatalf("ioutil.ReadAll -> %v", err)
+	}
+
+	res.Body.Close()
+
+	ioutil.WriteFile(parentPath+"/"+fileName, data, 0666)
+	log.Printf("Completed ...[%s]", url)
+	wg.Done()
+}
+
+func mkPath(path string) {
+
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		//fmt.Printf("file does not exist")
+		os.MkdirAll(path, 0777)
+	}
+
+}
+
+func addHarFile(harFile HarFile) {
+	contxtPath := strings.Replace(harFile.URL, "https://", "", -1)
+	contxtPath = strings.Replace(contxtPath, "http://", "", -1)
+	parentPath := filepath.Dir(strings.Split(contxtPath, "?")[0])
+	fileName := filepath.Base(strings.Split(contxtPath, "?")[0])
+	wg.Add(1)
+	go func() {
+		//mkPath(filepath.Dir(strings.Split(contxtPath, "?")[0]))
+		downloadURL(harFile.URL, parentPath, fileName)
+	}()
+
+	files = append(files, harFile)
 }
 
 func output(index int, entry HEntry) {
@@ -179,12 +237,29 @@ func output(index int, entry HEntry) {
 }
 
 func listEntries(index int, entry HEntry) {
-	fmt.Printf("[%3d][%6s][%25s][Size:%8d][URL:%s]\n", index, entry.Request.Method, entry.Response.Content.MimeType, entry.Response.Content.Size, entry.Request.Url)
+	harFile := HarFile{
+		URL:      entry.Request.Url,
+		Method:   entry.Request.Method,
+		Size:     entry.Response.Content.Size,
+		MimeType: entry.Response.Content.MimeType,
+	}
+	if download {
+		addHarFile(harFile)
+	} else {
+		fmt.Printf("[%3d][%6s][%25s][Size:%8d][URL:%s]\n", index, entry.Request.Method, entry.Response.Content.MimeType, entry.Response.Content.Size, entry.Request.Url)
+	}
 }
 
 func extractOne(entry HEntry) {
 	fmt.Print(entry.Response.Content.Text)
 }
+
+var (
+	files = make([]HarFile, 0)
+	wg    sync.WaitGroup
+)
+
+var download bool = false
 
 var list bool = false
 
@@ -225,6 +300,10 @@ func main() {
 	switch os.Args[1] {
 	case "-l":
 		list = true
+		fileName = os.Args[2]
+	case "-ld":
+		list = true
+		download = true
 		fileName = os.Args[2]
 	case "-lu":
 		list = true
@@ -275,5 +354,5 @@ func main() {
 		log.Fatal(err)
 		os.Exit(-1)
 	}
-
+	wg.Wait()
 }
